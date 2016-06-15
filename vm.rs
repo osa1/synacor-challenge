@@ -9,6 +9,7 @@ use std::io::Read;
 use std::io::Write;
 use std::io;
 use std::process;
+use std::str::FromStr;
 
 // Here's how I did it:
 //
@@ -72,6 +73,14 @@ use std::process;
 // verification process. Brute-force is definitely not possible though, this
 // took about 10 minutes. 2^15 numbers, each one taking 10 mintes to take, would
 // take 227 days to test.
+//
+// ...
+//
+// Started implementing a debugger. Not sure how I'll use it but I'm hoping to
+// inspect which instructions read/ write to R8.
+//
+// I just realized things would be so much easier if we knew that the program
+// isn't generating any instructions dynamically...
 
 #[derive(Debug, Clone, Copy)]
 enum Value {
@@ -134,6 +143,47 @@ struct VM {
 
     /// Record executed instructions, with machine state. (stack and registers)
     record : bool,
+
+    breakpoints : Vec<Breakpoint>,
+}
+
+#[derive(Clone, Copy)]
+enum Breakpoint {
+    /// Break when instruction pointer is pointing at the given address.
+    Addr { addr: u16 },
+
+    /// Break when instruction pointer is pointing at a given type of
+    /// instruction.
+    Instr { instr: Instr },
+
+    /// Break when hit 0. NOTE: Doesn't count print instructions.
+    Count(i32),
+
+    /// Break when a register is read.
+    RegRead { reg: u8 },
+
+    /// Break when a register is written.
+    RegWrite { reg: u8 },
+}
+
+impl Breakpoint {
+    fn ticks_left(&self) -> bool {
+        match *self {
+            Breakpoint::Count(n) => {
+                if n < 0 { false } else { true }
+            }
+            _ => true,
+        }
+    }
+
+    fn tick(&mut self) {
+        match self {
+            &mut Breakpoint::Count(ref mut n) => {
+                *n = *n - 1;
+            },
+            _ => {}
+        }
+    }
 }
 
 impl VM {
@@ -146,6 +196,7 @@ impl VM {
             input_buf: String::new(),
             input_log_file: None,
             record: false,
+            breakpoints: Vec::new(),
         }
     }
 
@@ -235,7 +286,91 @@ impl VM {
                      "Regs: {:?} Stack: {:?}", self.regs, self.stack).unwrap();
         }
 
+        // Skip instructions don't tick breakpoints. (so `break_instr out` won't
+        // work but that's OK)
+        if instr != Instr::Out {
+            self.breakpoints.retain(|b| b.ticks_left());
+
+            let mut brk = false;
+
+            for bp in self.breakpoints.iter_mut() {
+                bp.tick();
+
+                if !brk {
+                    match *bp {
+                        Breakpoint::Addr { addr } => {
+                            brk = brk || addr == self.ip;
+                        },
+                        Breakpoint::Instr { instr: instr1 } => {
+                            brk = brk || instr == instr1;
+                        },
+                        Breakpoint::Count(n) => {
+                            brk = brk || n == 0;
+                        },
+                        Breakpoint::RegRead { reg } => {
+                            // TODO
+                        },
+                        Breakpoint::RegWrite { reg } => {
+                            // TODO
+                        },
+                    }
+                }
+            }
+
+            if brk {
+                return self.show_debug_prompt(instr, args);
+            }
+        }
+
         self.execute_instr_(instr, args)
+    }
+
+    fn show_debug_prompt(&mut self, instr : Instr, args : Vec<Value>) -> bool {
+        println!("");
+        println!("REGS:  [{}] [{}] [{}] [{}] [{}] [{}] [{}] [{}]",
+                 self.regs[0], self.regs[1], self.regs[2], self.regs[3],
+                 self.regs[4], self.regs[5], self.regs[6], self.regs[7]);
+        println!("STACK: {:?}", self.stack);
+        println!("IP:    {0:x}", self.ip);
+
+        println!(">>> {:?} {:?}\n", instr, args);
+
+        loop {
+            print!("> ");
+            io::stdout().flush().unwrap();
+
+            let mut input = String::new();
+            io::stdin().read_line(&mut input).unwrap();
+            let words : Vec<&str> = input.split_whitespace().collect();
+
+            if words.len() == 0 || words[0] == "c" {
+                return self.execute_instr_(instr, args);
+            }
+
+            else if words[0] == "skip" {
+                self.breakpoints.push(Breakpoint::Count(words[1].parse().unwrap()));
+                return self.execute_instr_(instr, args);
+            }
+
+            else if words[0] == "step" {
+                self.breakpoints.push(Breakpoint::Count(1));
+                return self.execute_instr_(instr, args);
+            }
+
+            else if words[0] == "break_addr" {
+                self.breakpoints.push(
+                    Breakpoint::Addr { addr: words[1].parse().unwrap() });
+            }
+
+            else if words[0] == "break_instr" {
+                self.breakpoints.push(
+                    Breakpoint::Instr { instr: words[1].parse().unwrap() });
+            }
+
+            else {
+                println!("Unknown command: {}", input);
+            }
+        }
     }
 
     fn execute_instr_(&mut self, instr : Instr, args : Vec<Value>) -> bool {
@@ -443,6 +578,11 @@ impl VM {
                         return self.execute_instr_(instr, args);
                     }
 
+                    else if self.input_buf == "/debug\n" {
+                        self.input_buf.clear();
+                        return self.show_debug_prompt(instr, args)
+                    }
+
                     else {
                         if let Some(ref mut input_log_file) = self.input_log_file {
                             write!(input_log_file, "{}", self.input_buf).unwrap();
@@ -467,7 +607,7 @@ impl VM {
 
 /// Instructions. Enum value is opcode. Refer to OPCODE_INSTRS to number of
 /// arguments they take.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Instr {
     Halt = 0,
     Set,
@@ -482,6 +622,20 @@ enum Instr {
     Noop
 }
 
+impl FromStr for Instr {
+    type Err = String;
+
+    fn from_str(s : &str) -> Result<Instr, String> {
+        for instr in OPCODE_INSTRS.iter() {
+            if instr.2 == s {
+                return Ok(instr.0)
+            }
+        }
+
+        Err(format!("No such instruction: {}", s))
+    }
+}
+
 impl Instr {
     fn len(&self) -> u16 {
         OPCODE_INSTRS[*self as usize].1 as u16 + 1
@@ -490,13 +644,29 @@ impl Instr {
 
 /// Mapping of instructions to number of arguments they take. Instruction at
 /// index n has opcode n. Enum value of instructions also give these opcodes.
-static OPCODE_INSTRS : [(Instr, u8); 22] =
-    [ (Instr::Halt, 0), (Instr::Set, 2), (Instr::Push, 1), (Instr::Pop, 1),
-      (Instr::Eq, 3), (Instr::Gt, 3), (Instr::Jmp, 1), (Instr::Jt, 2),
-      (Instr::Jf, 2), (Instr::Add, 3), (Instr::Mult, 3), (Instr::Mod, 3),
-      (Instr::And, 3), (Instr::Or, 3), (Instr::Not, 2), (Instr::Rmem, 2),
-      (Instr::Wmem, 2), (Instr::Call, 1), (Instr::Ret, 0), (Instr::Out, 1),
-      (Instr::In, 1), (Instr::Noop, 0) ];
+static OPCODE_INSTRS : [(Instr, u8, &'static str); 22] =
+    [ (Instr::Halt, 0, "halt"),
+      (Instr::Set, 2, "set"),
+      (Instr::Push, 1, "push"),
+      (Instr::Pop, 1, "pop"),
+      (Instr::Eq, 3, "eq"),
+      (Instr::Gt, 3, "gt"),
+      (Instr::Jmp, 1, "jmp"),
+      (Instr::Jt, 2, "jt"),
+      (Instr::Jf, 2, "jf"),
+      (Instr::Add, 3, "add"),
+      (Instr::Mult, 3, "mult"),
+      (Instr::Mod, 3, "mod"),
+      (Instr::And, 3, "and"),
+      (Instr::Or, 3, "or"),
+      (Instr::Not, 2, "not"),
+      (Instr::Rmem, 2, "rmem"),
+      (Instr::Wmem, 2, "wmem"),
+      (Instr::Call, 1, "call"),
+      (Instr::Ret, 0, "ret"),
+      (Instr::Out, 1, "out"),
+      (Instr::In, 1, "in"),
+      (Instr::Noop, 0, "noop") ];
 
 fn main() {
     println!("Running a test...");
