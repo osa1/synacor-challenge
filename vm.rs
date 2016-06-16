@@ -81,8 +81,22 @@ use std::str::FromStr;
 //
 // I just realized things would be so much easier if we knew that the program
 // isn't generating any instructions dynamically...
+//
+// ...
+//
+// Some investigation on the execution using new `break_reg_read` and
+// `break_reg_write` breakpoints revealed that when teleporter is used, R8 is
+// compared with zero:
+//
+//   > Jf [Reg(7), Num(5605)]
+//
+// (reg indices start from 0, so Reg(7) is actually register 8)
+//
+// Next obvious step is to disassemble instructions after this instruction and
+// to try to understand what's happening. For that I'll first need to implement
+// a disassembler.
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Value {
     /// 0 .. 32767
     Num(u16),
@@ -147,7 +161,7 @@ struct VM {
     breakpoints : Vec<Breakpoint>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 enum Breakpoint {
     /// Break when instruction pointer is pointing at the given address.
     Addr { addr: u16 },
@@ -249,17 +263,17 @@ impl VM {
         }
     }
 
-    fn decode_instr(&self) -> (Instr, Vec<Value>) {
-        assert!(self.ip < 32758);
+    fn decode_instr_at(&self, ip : u16) -> (Instr, Vec<Value>) {
+        assert!(ip < 32758);
 
-        let opcode = self.mem[self.ip as usize];
-        assert!(opcode <= 21, "Invalid opcode at addr {}: {}", self.ip, opcode);
+        let opcode = self.mem[ip as usize];
+        assert!(opcode <= 21, "Invalid opcode at addr {}: {}", ip, opcode);
 
         let opcode_args = OPCODE_INSTRS[opcode as usize].1;
         let mut args = Vec::with_capacity(opcode_args as usize);
 
         for i in 0 .. opcode_args {
-            let idx = ((self.ip + 1) as usize) + (i as usize);
+            let idx = ((ip + 1) as usize) + (i as usize);
             let val = self.mem[idx];
             args.push(Value::decode(val));
         }
@@ -276,7 +290,7 @@ impl VM {
 
     /// True -> halt
     fn execute_instr(&mut self) -> bool {
-        let (instr, args) = self.decode_instr();
+        let (instr, args) = self.decode_instr_at(self.ip);
 
         if self.record {
             writeln!(io::stderr(),
@@ -308,10 +322,52 @@ impl VM {
                             brk = brk || n == 0;
                         },
                         Breakpoint::RegRead { reg } => {
-                            // TODO
+                            let reg_val = Value::Reg(reg);
+                            match instr {
+                                Instr::Set => {
+                                    brk = brk || args[1] == reg_val;
+                                },
+                                Instr::Push => {
+                                    brk = brk || args[0] == reg_val;
+                                },
+                                Instr::Eq => {
+                                    brk = brk || args[0] == reg_val || args[1] == reg_val;
+                                },
+                                Instr::Gt => {
+                                    brk = brk || args[1] == reg_val || args[2] == reg_val;
+                                },
+                                Instr::Jt | Instr::Jf | Instr::Call | Instr::Jmp => {
+                                    brk = brk || args[0] == reg_val;
+                                },
+                                Instr::Add | Instr::Mult | Instr::Mod | Instr::And | Instr::Or => {
+                                    brk = brk || args[1] == reg_val || args[2] == reg_val;
+                                },
+                                Instr::Not => {
+                                    brk = brk || args[1] == reg_val;
+                                },
+                                Instr::Rmem | Instr::Wmem => {
+                                    brk = brk || args[1] == reg_val;
+                                },
+                                Instr::Halt | Instr::Pop | Instr::Ret | Instr::Out | Instr::In | Instr::Noop => {}
+                            }
                         },
                         Breakpoint::RegWrite { reg } => {
-                            // TODO
+                            let reg_val = Value::Reg(reg);
+                            match instr {
+                                Instr::Set => {
+                                    brk = brk || args[1] == reg_val;
+                                },
+                                Instr::Pop => {
+                                    brk = brk || args[0] == reg_val;
+                                },
+                                Instr::Eq | Instr::Gt | Instr::Add | Instr::Mult | Instr::Mod
+                                    | Instr::And | Instr::Or | Instr::Not | Instr::Rmem | Instr::Wmem  =>
+                                {
+                                    brk = brk || args[0] == reg_val;
+                                },
+                                Instr::Push | Instr::Jmp | Instr::Jt | Instr::Jf | Instr::Halt
+                                    | Instr::Call | Instr::Ret | Instr::Out | Instr::In | Instr::Noop => {}
+                            }
                         },
                     }
                 }
@@ -330,8 +386,10 @@ impl VM {
         println!("REGS:  [{}] [{}] [{}] [{}] [{}] [{}] [{}] [{}]",
                  self.regs[0], self.regs[1], self.regs[2], self.regs[3],
                  self.regs[4], self.regs[5], self.regs[6], self.regs[7]);
-        println!("STACK: {:?}", self.stack);
-        println!("IP:    {0:x}", self.ip);
+        println!("STACK:      {:?}", self.stack);
+        println!("IP:         {}", self.ip);
+        println!("INSTR SIZE: {}", instr.len());
+        println!("NEXT IP:    {}", self.ip + instr.len());
 
         println!(">>> {:?} {:?}\n", instr, args);
 
@@ -365,6 +423,47 @@ impl VM {
             else if words[0] == "break_instr" {
                 self.breakpoints.push(
                     Breakpoint::Instr { instr: words[1].parse().unwrap() });
+            }
+
+            else if words[0] == "break_reg_read" {
+                self.breakpoints.push(
+                    Breakpoint::RegRead { reg: words[1].parse().unwrap() });
+            }
+
+            else if words[0] == "break_reg_write" {
+                self.breakpoints.push(
+                    Breakpoint::RegWrite { reg: words[1].parse().unwrap() });
+            }
+
+            else if words[0] == "set_reg" {
+                let reg_no : usize = words[1].parse().unwrap();
+                let val = words[2].parse().unwrap();
+                self.regs[reg_no] = val;
+            }
+
+            else if words[0] == "reg" {
+                let reg_no : usize = words[1].parse().unwrap();
+                let reg_val = self.regs[reg_no];
+                println!("REG {}: {}", reg_no, reg_val);
+            }
+
+            else if words[0] == "breakpoints" {
+                self.show_breakpoints();
+            }
+
+            else if words[0] == "remove_bp" {
+                let bp = words[1].parse().unwrap();
+                self.breakpoints.remove(bp);
+            }
+
+            else if words[0] == "disas" {
+                let mut addr : u16 = words[1].parse().unwrap();
+                let instrs : u16 = words[2].parse().unwrap();
+                for _ in 0 .. instrs {
+                    let (instr, args) = self.decode_instr_at(addr);
+                    println!("[{}] {:?} {:?}", addr, instr, args);
+                    addr = addr + instr.len();
+                }
             }
 
             else {
@@ -601,6 +700,12 @@ impl VM {
                 self.ip += instr.len();
                 false
             }
+        }
+    }
+
+    fn show_breakpoints(&self) {
+        for (bp_idx, bp) in self.breakpoints.iter().enumerate() {
+            println!("[{}] {:?}", bp_idx, bp);
         }
     }
 }
