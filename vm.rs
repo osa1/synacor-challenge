@@ -432,7 +432,9 @@ impl VM {
             }
 
             else if words[0] == "c" {
-                return self.execute_instr_(instr, args);
+                // let (instr, args) = self.decode_instr_at(self.ip).unwrap();
+                // return self.execute_instr_(instr, args);
+                return self.execute_instr();
             }
 
             else if words[0] == "skip" {
@@ -465,6 +467,11 @@ impl VM {
                 let reg_no : usize = unwrap_or_cont_res!(words[1].parse());
                 let val = unwrap_or_cont_res!(words[2].parse());
                 self.regs[reg_no] = val;
+            }
+
+            else if words[0] == "set_ip" {
+                let ip = unwrap_or_cont_res!(words[1].parse());
+                self.ip = ip;
             }
 
             else if words[0] == "reg" {
