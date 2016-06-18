@@ -408,7 +408,7 @@ impl VM {
 
     fn show_debug_prompt(&mut self, instr : Instr, args : Vec<Value>) -> bool {
         println!("");
-        println!("REGS:  [{}] [{}] [{}] [{}] [{}] [{}] [{}] [{}]",
+        println!("REGS:       [{}] [{}] [{}] [{}] [{}] [{}] [{}] [{}]",
                  self.regs[0], self.regs[1], self.regs[2], self.regs[3],
                  self.regs[4], self.regs[5], self.regs[6], self.regs[7]);
         println!("STACK:      {:?}", self.stack);
