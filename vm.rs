@@ -426,17 +426,17 @@ impl VM {
             io::stdin().read_line(&mut input).unwrap();
             let words : Vec<&str> = input.split_whitespace().collect();
 
-            if words.len() == 0 || words[0] == "c" {
+            if words.len() == 0 || words[0] == "step" {
+                self.breakpoints.push(Breakpoint::Count(1));
+                return self.execute_instr_(instr, args);
+            }
+
+            else if words[0] == "c" {
                 return self.execute_instr_(instr, args);
             }
 
             else if words[0] == "skip" {
                 self.breakpoints.push(Breakpoint::Count(unwrap_or_cont_res!(words[1].parse())));
-                return self.execute_instr_(instr, args);
-            }
-
-            else if words[0] == "step" {
-                self.breakpoints.push(Breakpoint::Count(1));
                 return self.execute_instr_(instr, args);
             }
 
