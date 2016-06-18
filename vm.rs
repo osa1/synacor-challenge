@@ -176,9 +176,6 @@ struct VM {
     /// is correct.
     input_log_file : Option<File>,
 
-    /// Record executed instructions, with machine state. (stack and registers)
-    record : bool,
-
     breakpoints : Vec<Breakpoint>,
 }
 
@@ -230,7 +227,6 @@ impl VM {
             ip: 0,
             input_buf: String::new(),
             input_log_file: None,
-            record: false,
             breakpoints: Vec::new(),
         }
     }
@@ -315,22 +311,23 @@ impl VM {
 
     /// True -> halt
     fn execute_instr(&mut self) -> bool {
-        let (instr, args) = self.decode_instr_at(self.ip).unwrap();
+        let mut brk = false;
 
-        if self.record {
-            writeln!(io::stderr(),
-                     "Executing instruction: {:?} {:?} (at {})",
-                     instr, args, self.ip).unwrap();
-            writeln!(io::stderr(),
-                     "Regs: {:?} Stack: {:?}", self.regs, self.stack).unwrap();
+        if self.ip == 6027 {
+            println!("Ackermann function called.");
+            self.show_vm_state();
+            println!("\nReturning without running the function...");
+            let ret_addr = self.stack.pop().unwrap();
+            self.ip = ret_addr;
+            brk = true;
         }
+
+        let (instr, args) = self.decode_instr_at(self.ip).unwrap();
 
         // Skip instructions don't tick breakpoints. (so `break_instr out` won't
         // work but that's OK)
         if instr != Instr::Out {
             self.breakpoints.retain(|b| b.ticks_left());
-
-            let mut brk = false;
 
             for bp in self.breakpoints.iter_mut() {
                 bp.tick();
@@ -406,16 +403,19 @@ impl VM {
         self.execute_instr_(instr, args)
     }
 
-    fn show_debug_prompt(&mut self, instr : Instr, args : Vec<Value>) -> bool {
+    fn show_vm_state(&self) {
         println!("");
         println!("REGS:       [{}] [{}] [{}] [{}] [{}] [{}] [{}] [{}]",
                  self.regs[0], self.regs[1], self.regs[2], self.regs[3],
                  self.regs[4], self.regs[5], self.regs[6], self.regs[7]);
         println!("STACK:      {:?}", self.stack);
         println!("IP:         {}", self.ip);
-        println!("INSTR SIZE: {}", instr.len());
-        println!("NEXT IP:    {}", self.ip + instr.len());
+        // println!("INSTR SIZE: {}", instr.len());
+        // println!("NEXT IP:    {}", self.ip + instr.len());
+    }
 
+    fn show_debug_prompt(&mut self, instr : Instr, args : Vec<Value>) -> bool {
+        self.show_vm_state();
         println!(">>> {:?} {:?}\n", instr, args);
 
         loop {
@@ -429,6 +429,10 @@ impl VM {
             if words.len() == 0 || words[0] == "step" {
                 self.breakpoints.push(Breakpoint::Count(1));
                 return self.execute_instr_(instr, args);
+            }
+
+            else if words[0] == "status" {
+                self.show_vm_state();
             }
 
             else if words[0] == "c" {
@@ -672,34 +676,7 @@ impl VM {
                 if self.input_buf.len() == 0 {
                     io::stdin().read_line(&mut self.input_buf).unwrap();
 
-                    // here we add "recording" support to VM. if the message is
-                    // "/record" we start recording executed instructions until
-                    // we read "/record" again.
-
-                    if self.input_buf == "/record\n" {
-                        if self.record {
-                            println!("Recording stopped.");
-                            self.record = false;
-                        } else {
-                            println!("Starting recording.");
-                            self.record = true;
-                        }
-
-                        // Read another line
-                        self.input_buf.clear();
-                        return self.execute_instr_(instr, args);
-                    }
-
-                    else if self.input_buf == "/fix_r8\n" {
-                        self.regs[7] = 1;
-                        println!("Done.");
-
-                        // Read another line
-                        self.input_buf.clear();
-                        return self.execute_instr_(instr, args);
-                    }
-
-                    else if self.input_buf == "/dump\n" {
+                    if self.input_buf == "/dump\n" {
                         {
                             let mut file = OpenOptions::new()
                                 .create(true)
