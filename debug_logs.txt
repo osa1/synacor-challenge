@@ -1,0 +1,107 @@
+After `use teleporter`, first time R8 is read is by this:
+
+REGS:       [2708] [5445] [3] [10] [101] [0] [0] [0]
+STACK:      [6080, 16, 6124, 1, 2952, 25978, 3568, 3599, 2708, 5445, 3]
+IP:         5451
+INSTR SIZE: 3
+NEXT IP:    5454
+
+> disas 5451 100
+[5451] Jf [Reg(7), Num(5605)]
+[5454] Push [Reg(0)]
+[5456] Push [Reg(1)]
+[5458] Push [Reg(2)]
+[5460] Set [Reg(0), Num(28844)]
+[5463] Set [Reg(1), Num(1531)]
+[5466] Add [Reg(2), Num(10236), Num(7398)]
+<<<<<< REGS:       [28844] [1531] [17634] [10] [101] [0] [0] [1]
+[5470] Call [Num(1458)] -- print_string()
+[5472] Pop [Reg(2)]
+[5474] Pop [Reg(1)]
+[5476] Pop [Reg(0)]
+[5478] Noop []
+[5479] Noop []
+[5480] Noop []
+[5481] Noop []
+[5482] Noop []
+...
+
+Interestingly, even though stack has stuff in it, this doesn't look like a
+function -- it restores R1, R2, and R3 but doesn't return.
+
+5605 should be doing the usual stuff. So we should look at what 1458 is doing.
+
+On entry R1 is 28844, R2 is 1531, R3 is 17634.
+
+> disas 1458 100
+[1458] Push [Reg(0)]
+[1460] Push [Reg(3)]
+[1462] Push [Reg(4)]
+[1464] Push [Reg(5)]
+[1466] Push [Reg(6)]
+[1468] Set [Reg(6), Reg(0)]
+[1471] Set [Reg(5), Reg(1)]
+<<<<<< REGS:       [28844] [1531] [17634] [10] [101] [1531] [28844] [1]
+[1474] Rmem [Reg(4), Reg(0)]
+<<<<<< REGS:       [28844] [1531] [17634] [10] [169] [1531] [28844] [1]
+[1477] Set [Reg(1), Num(0)]
+[1480] Add [Reg(3), Num(1), Reg(1)]
+<<<<<< REGS:       [28844] [0] [17634] [1] [169] [1531] [28844] [1]
+[1484] Gt [Reg(0), Reg(3), Reg(4)] -- if (reg3 > reg4) { return; }
+[1488] Jt [Reg(0), Num(1507)] ------------- jumps to 1507 (returns)
+[1491] Add [Reg(3), Reg(3), Reg(6)] -- reg3 += reg6;
+[1495] Rmem [Reg(0), Reg(3)] -- reg0 = *reg3;
+[1498] Call [Reg(5)] ---------------------- jumps to 1531
+[1500] Add [Reg(1), Reg(1), Num(1)] -- reg1 += 1;
+[1504] Jt [Reg(1), Num(1480)] ------------- jumps to 1480 (loop)
+[1507] Pop [Reg(6)]
+[1509] Pop [Reg(5)]
+[1511] Pop [Reg(4)]
+[1513] Pop [Reg(3)]
+[1515] Pop [Reg(0)]
+[1517] Ret [] ----------------------------- end of basic block 1458
+
+This looks like something that prints a string. Indeed, I placed a breakpoint at
+1517, and when I run it just printed stuff.
+
+At this point in prints this btw:
+
+    A strange, electronic voice is projected into your mind:
+
+      "Unusual setting detected!  Starting confirmation process!  Estimated time to completion: 1 billion years."
+
+Good! Now we return to 5472. Which just restores some registers but doesn't
+return! It turns out it executes instructions after NOOPs...
+
+[5483] Set [Reg(0), Num(4)]
+[5486] Set [Reg(1), Num(1)]
+<<<<<< REGS:       [4] [1] [3] [10] [101] [0] [0] [1]
+<<<<<< STACK:      [6080, 16, 6124, 1, 2952, 25978, 3568, 3599, 2708, 5445, 3]
+[5489] Call [Num(6027)]
+...
+
+> disas 6027 100
+                                         -- fn(reg0 = 4, reg1 = 1, reg7 = our value) {
+[6027] Jt [Reg(0), Num(6035)]            --   if reg0 == 0 {
+[6030] Add [Reg(0), Reg(1), Num(1)]      --     reg0 = reg1 + 1;
+[6034] Ret []                            --     return; }
+[6035] Jt [Reg(1), Num(6048)]            --   if reg1 == 0 {
+[6038] Add [Reg(0), Reg(0), Num(32767)]  --     reg0 -= 1;
+[6042] Set [Reg(1), Reg(7)]              --     reg1 = reg7;
+[6045] Call [Num(6027)] ------ loop      --     fn();
+[6047] Ret []                            --     return; }
+[6048] Push [Reg(0)]                     --   push(reg0);
+[6050] Add [Reg(1), Reg(1), Num(32767)]  --   reg1 -= 1;
+[6054] Call [Num(6027)] ------ loop      --   fn();
+[6056] Set [Reg(1), Reg(0)]              --   reg1 = reg0;
+[6059] Pop [Reg(0)]                      --   reg0 = pop();
+[6061] Add [Reg(0), Reg(0), Num(32767)]  --   reg0 -= 1;
+[6065] Call [Num(6027)] ------ loop      --   fn();
+[6067] Ret [] --end of basic block 6027  --   return;
+                                         -- }
+
+Used registers: 0, 1, 7.
+Stack is also used.
+
+I implemented this in Rust (in fn.rs). I still don't have any ideas of what this
+is doing though...
