@@ -96,6 +96,27 @@ use std::str::FromStr;
 // to try to understand what's happening. For that I'll first need to implement
 // a disassembler.
 
+////////////////////////////////////////////////////////////////////////////////
+
+// A problem with higher-order functions like `or_else()` is that you can't
+// `continue` (or `break`) a loop using from the lambdas passed to them. In a
+// language with TCO, I'd just call the loop function. In Rust I guess I do
+// this:
+
+macro_rules! unwrap_or_cont_res {
+    ($x:expr) => {
+        match $x {
+            Ok(x) => x,
+            Err(err) => {
+                println!("ERROR: {}", err);
+                continue;
+            }
+        }
+    }
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Value {
     /// 0 .. 32767
@@ -263,11 +284,15 @@ impl VM {
         }
     }
 
-    fn decode_instr_at(&self, ip : u16) -> (Instr, Vec<Value>) {
+    fn decode_instr_at(&self, ip : u16) -> Option<(Instr, Vec<Value>)> {
         assert!(ip < 32758);
 
         let opcode = self.mem[ip as usize];
-        assert!(opcode <= 21, "Invalid opcode at addr {}: {}", ip, opcode);
+
+        if opcode > 21 {
+            return None;
+        }
+        // assert!(opcode <= 21, "Invalid opcode at addr {}: {}", ip, opcode);
 
         let opcode_args = OPCODE_INSTRS[opcode as usize].1;
         let mut args = Vec::with_capacity(opcode_args as usize);
@@ -278,7 +303,7 @@ impl VM {
             args.push(Value::decode(val));
         }
 
-        (OPCODE_INSTRS[opcode as usize].0, args)
+        Some((OPCODE_INSTRS[opcode as usize].0, args))
     }
 
     fn num(&self, val : Value) -> u16 {
@@ -290,7 +315,7 @@ impl VM {
 
     /// True -> halt
     fn execute_instr(&mut self) -> bool {
-        let (instr, args) = self.decode_instr_at(self.ip);
+        let (instr, args) = self.decode_instr_at(self.ip).unwrap();
 
         if self.record {
             writeln!(io::stderr(),
@@ -406,7 +431,7 @@ impl VM {
             }
 
             else if words[0] == "skip" {
-                self.breakpoints.push(Breakpoint::Count(words[1].parse().unwrap()));
+                self.breakpoints.push(Breakpoint::Count(unwrap_or_cont_res!(words[1].parse())));
                 return self.execute_instr_(instr, args);
             }
 
@@ -417,34 +442,40 @@ impl VM {
 
             else if words[0] == "break_addr" {
                 self.breakpoints.push(
-                    Breakpoint::Addr { addr: words[1].parse().unwrap() });
+                    Breakpoint::Addr { addr: unwrap_or_cont_res!(words[1].parse()) });
             }
 
             else if words[0] == "break_instr" {
                 self.breakpoints.push(
-                    Breakpoint::Instr { instr: words[1].parse().unwrap() });
+                    Breakpoint::Instr { instr: unwrap_or_cont_res!(words[1].parse()) });
             }
 
             else if words[0] == "break_reg_read" {
                 self.breakpoints.push(
-                    Breakpoint::RegRead { reg: words[1].parse().unwrap() });
+                    Breakpoint::RegRead { reg: unwrap_or_cont_res!(words[1].parse()) });
             }
 
             else if words[0] == "break_reg_write" {
                 self.breakpoints.push(
-                    Breakpoint::RegWrite { reg: words[1].parse().unwrap() });
+                    Breakpoint::RegWrite { reg: unwrap_or_cont_res!(words[1].parse()) });
             }
 
             else if words[0] == "set_reg" {
-                let reg_no : usize = words[1].parse().unwrap();
-                let val = words[2].parse().unwrap();
+                // let reg_no : usize = unwrap_or_cont_res!(words[1].parse());
+                let reg_no : usize = unwrap_or_cont_res!(words[1].parse());
+                let val = unwrap_or_cont_res!(words[2].parse());
                 self.regs[reg_no] = val;
             }
 
             else if words[0] == "reg" {
-                let reg_no : usize = words[1].parse().unwrap();
+                let reg_no : usize = unwrap_or_cont_res!(words[1].parse());
                 let reg_val = self.regs[reg_no];
                 println!("REG {}: {}", reg_no, reg_val);
+            }
+
+            else if words[0] == "mem" {
+                let addr : usize = unwrap_or_cont_res!(words[1].parse());
+                println!("MEM {}: {}", addr, self.mem[addr]);
             }
 
             else if words[0] == "breakpoints" {
@@ -452,17 +483,21 @@ impl VM {
             }
 
             else if words[0] == "remove_bp" {
-                let bp = words[1].parse().unwrap();
+                let bp = unwrap_or_cont_res!(words[1].parse());
                 self.breakpoints.remove(bp);
             }
 
             else if words[0] == "disas" {
-                let mut addr : u16 = words[1].parse().unwrap();
-                let instrs : u16 = words[2].parse().unwrap();
+                let mut addr : u16 = unwrap_or_cont_res!(words[1].parse());
+                let instrs : u16 = unwrap_or_cont_res!(words[2].parse());
                 for _ in 0 .. instrs {
-                    let (instr, args) = self.decode_instr_at(addr);
-                    println!("[{}] {:?} {:?}", addr, instr, args);
-                    addr = addr + instr.len();
+                    match self.decode_instr_at(addr) {
+                        None => { break; }
+                        Some((instr, args)) => {
+                            println!("[{}] {:?} {:?}", addr, instr, args);
+                            addr = addr + instr.len();
+                        }
+                    }
                 }
             }
 
