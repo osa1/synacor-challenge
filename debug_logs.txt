@@ -143,6 +143,16 @@ to here:
   -- to be generated otherwise I could just look at strings in the binary...
   --
   -- So I guess I need to understand function at 1841.
+
+Ok.. I 1841 is messy, but I don't think we need to understand it. It's somehow
+used in the code generation, and as "seed" it uses our R8 before using the
+teleportation. Also, the Ackermann-like function needs to return 6. So
+basically, we need to find R8 that makes this Ackermann-like function to return
+6. Then that value will be used as "seed" in 1841 and it'll generate our correct
+code.
+
+I implemented a program that calculates this, see `fn.rs`.
+
 [5540 - 5562] print_string(29245, 1531, Num(3250) + Num(2099));
 [5564] Wmem [Num(2732), Num(2498)]
 [5567] Wmem [Num(2733), Num(0)]
@@ -177,90 +187,6 @@ to here:
 [5716] Pop [Reg(1)]
 [5718] Pop [Reg(0)]
 [5720] Ret []
-
-
-> disas 5516 100
-[5516] Pop [Reg(2)]
-[5518] Pop [Reg(1)]
-[5520] Pop [Reg(0)]
-[5522] Set [Reg(0), Reg(7)]
-[5525] Set [Reg(1), Num(25866)]
-[5528] Set [Reg(2), Num(32767)]
-[5531] Push [Reg(3)]
-[5533] Set [Reg(3), Num(29241)]
-[5536] Call [Num(1841)]
-[5538] Pop [Reg(3)]
-[5540] Push [Reg(0)]
-[5542] Push [Reg(1)]
-[5544] Push [Reg(2)]
-[5546] Set [Reg(0), Num(29245)]
-[5549] Set [Reg(1), Num(1531)]
-[5552] Add [Reg(2), Num(3250), Num(2099)]
-[5556] Call [Num(1458)]
-[5558] Pop [Reg(2)]
-[5560] Pop [Reg(1)]
-[5562] Pop [Reg(0)]
-[5564] Wmem [Num(2732), Num(2498)]
-[5567] Wmem [Num(2733), Num(0)]
-[5570] Add [Reg(1), Num(2708), Num(2)]
-[5574] Wmem [Reg(1), Num(32767)]
-[5577] Jmp [Num(5714)]
-[5579] Push [Reg(0)]
-[5581] Push [Reg(1)]
-[5583] Push [Reg(2)]
-[5585] Set [Reg(0), Num(29400)]
-[5588] Set [Reg(1), Num(1531)]
-[5591] Add [Reg(2), Num(7707), Num(82)]
-[5595] Call [Num(1458)]
-[5597] Pop [Reg(2)]
-[5599] Pop [Reg(1)]
-[5601] Pop [Reg(0)]
-[5603] Jmp [Num(5714)]
-[5605] Push [Reg(0)]
-[5607] Push [Reg(1)]
-[5609] Push [Reg(2)]
-[5611] Set [Reg(0), Num(29545)]
-[5614] Set [Reg(1), Num(1531)]
-[5617] Add [Reg(2), Num(11291), Num(10202)]
-[5621] Call [Num(1458)]
-[5623] Pop [Reg(2)]
-[5625] Pop [Reg(1)]
-[5627] Pop [Reg(0)]
-[5629] Set [Reg(0), Num(0)]
-[5632] Add [Reg(2), Num(1), Num(27101)]
-[5636] Rmem [Reg(1), Reg(2)]
-[5639] Add [Reg(0), Reg(0), Reg(1)]
-[5643] Mult [Reg(0), Reg(0), Num(31660)]
-[5647] Call [Num(2125)]
-[5649] Rmem [Reg(1), Num(27101)]
-[5652] Add [Reg(1), Reg(1), Num(27101)]
-[5656] Add [Reg(2), Reg(2), Num(1)]
-[5660] Gt [Reg(1), Reg(2), Reg(1)]
-[5664] Jf [Reg(1), Num(5636)]
-[5667] Set [Reg(1), Num(25866)]
-[5670] Set [Reg(2), Num(32767)]
-[5673] Push [Reg(3)]
-[5675] Set [Reg(3), Num(29663)]
-[5678] Call [Num(1841)]
-[5680] Pop [Reg(3)]
-[5682] Push [Reg(0)]
-[5684] Push [Reg(1)]
-[5686] Push [Reg(2)]
-[5688] Set [Reg(0), Num(29667)]
-[5691] Set [Reg(1), Num(1531)]
-[5694] Add [Reg(2), Num(12624), Num(1175)]
-[5698] Call [Num(1458)]
-[5700] Pop [Reg(2)]
-[5702] Pop [Reg(1)]
-[5704] Pop [Reg(0)]
-[5706] Wmem [Num(2732), Num(2488)]
-[5709] Wmem [Num(2733), Num(0)]
-[5712] Jmp [Num(5714)]
-[5714] Pop [Reg(2)]
-[5716] Pop [Reg(1)]
-[5718] Pop [Reg(0)]
-[5720] Ret []
-
 
 > disas 1841 100
 [1841] Push [Reg(3)]
@@ -320,9 +246,8 @@ to here:
 
 ---
 
-
-OK... So I need to write about the Ackermann thing but in the mantime I solved
-the last puzze, completeting the challenge.
+OK... So I need to write about the Ackermann thing but in the meantime I solved
+the last puzzle, completing the challenge.
 
 I realized it's a maze of 4x4. Each tile has either an operator (+, - or *) or a
 number. We take an orb at south-west corner, and vault door is at north-east
@@ -332,7 +257,7 @@ on the search state.
 
 Once we get in the vault we find a mirror. When we look at it we see a code is
 written on our forehead O_O. Now imagine looking at a mirror and reading a text.
-How would you go fron what you see to the original text? This is the last puzzle
+How would you go from what you see to the original text? This is the last puzzle
 of the challenge.
 
 ---
