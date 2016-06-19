@@ -268,14 +268,14 @@ to here:
 [1845] Push [Reg(5)]
 [1847] Push [Reg(6)]
 [1849] Set [Reg(6), Num(1)]                -- reg6 = 1
-[1852] Add [Reg(4), Reg(3), Reg(6)]        -- reg4 = reg3 + reg6
-[1856] Rmem [Reg(4), Reg(4)]               -- reg4 = *reg4
-[1859] Add [Reg(5), Num(6125), Reg(6)]     --
-[1863] Wmem [Reg(5), Reg(4)]
-[1866] Add [Reg(6), Reg(6), Num(1)]
-[1870] Rmem [Reg(5), Num(6125)]
-[1873] Gt [Reg(4), Reg(6), Reg(5)]
-[1877] Jf [Reg(4), Num(1852)]
+[1852] Add [Reg(4), Reg(3), Reg(6)]        -- reg4 = reg3 + reg6 -----------\
+[1856] Rmem [Reg(4), Reg(4)]               -- reg4 = *reg4                  |
+[1859] Add [Reg(5), Num(6125), Reg(6)]     -- reg5 = reg6 + 6125            |
+[1863] Wmem [Reg(5), Reg(4)]               -- *reg5 = reg4                  |
+[1866] Add [Reg(6), Reg(6), Num(1)]        -- r6 += 1                       |
+[1870] Rmem [Reg(5), Num(6125)]            -- r5 = *6125                    |
+[1873] Gt [Reg(4), Reg(6), Reg(5)]         -- reg4 = reg6 > reg5            |
+[1877] Jf [Reg(4), Num(1852)]              -- if reg4 == 0 { goto 1852; } --/
 [1880] Set [Reg(3), Num(0)]
 [1883] Set [Reg(4), Num(0)]
 [1886] Rmem [Reg(5), Num(6125)]
@@ -317,3 +317,26 @@ to here:
 [1996] Pop [Reg(4)]
 [1998] Pop [Reg(3)]
 [2000] Ret []
+
+---
+
+
+OK... So I need to write about the Ackermann thing but in the mantime I solved
+the last puzze, completeting the challenge.
+
+I realized it's a maze of 4x4. Each tile has either an operator (+, - or *) or a
+number. We take an orb at south-west corner, and vault door is at north-east
+corner. On the door it says "30". It's not hard to guess what's the puzzle here.
+I implemented a program that searches for a solution, using breadth-first search
+on the search state.
+
+Once we get in the vault we find a mirror. When we look at it we see a code is
+written on our forehead O_O. Now imagine looking at a mirror and reading a text.
+How would you go fron what you see to the original text? This is the last puzzle
+of the challenge.
+
+---
+
+Overall I really enjoyed the puzzle. I'd like to participate in more challenges
+like this, so if you know any similar challenges please let me know in the
+comments section below.
